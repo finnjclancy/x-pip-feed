@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Truth Scraper Test</title>
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f5f7fb;
+  color: #111;
+  margin: 0;
+  padding: 24px;
+}
+h1 {
+  font-size: 22px;
+  margin-bottom: 8px;
+}
+.note {
+  color: #555;
+  margin-bottom: 16px;
+  max-width: 800px;
+}
+.status {
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+.status.pass {
+  background: #daf5dd;
+  color: #155724;
+}
+.status.fail {
+  background: #fde2e2;
+  color: #7f1d1d;
+}
+.status.running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.results {
+  white-space: pre-wrap;
+  background: #fff;
+  border: 1px solid #d7dce5;
+  border-radius: 12px;
+  padding: 16px;
+  line-height: 1.4;
+  max-width: 1000px;
+}
+.fixture {
+  margin-top: 20px;
+  border-top: 1px solid #d7dce5;
+  padding-top: 20px;
+}
+.fixture-title {
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.truth-post {
+  background: #8fd2ff;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.truth-meta {
+  color: #0a3d62;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.truth-body {
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+</style>
+<script>
+window.chrome = {
+  runtime: {
+    id: "truth-test",
+    lastError: null,
+    sendMessage(message, callback) {
+      if (message.action === "isScraperTab") {
+        callback && callback({ isScraper: false });
+        return;
+      }
+      if (message.action === "getPipStatus") {
+        callback && callback({ active: false });
+        return;
+      }
+      callback && callback({ ok: true });
+    },
+    onMessage: {
+      addListener() {},
+    },
+  },
+  storage: {
+    local: {
+      get(_keys, callback) {
+        callback({});
+      },
+      set(_values, callback) {
+        if (callback) callback();
+      },
+    },
+    onChanged: {
+      addListener() {},
+      removeListener() {},
+    },
+  },
+  windows: {
+    getCurrent() {},
+    update() {},
+  },
+};
+</script>
+</head>
+<body>
+<h1>Truth Scraper Test</h1>
+<div class="note">
+  This is a disposable local test page. Open it in Chrome, wait for the result below,
+  and confirm that the extracted posts match the fixture. If it looks good, you can delete
+  <code>truth-test.html</code>.
+</div>
+<div id="status" class="status running">Running scraper test...</div>
+<div id="results" class="results"></div>
+
+<div class="fixture">
+  <div class="fixture-title">Fixture</div>
+
+  <div id="status-116263563453969628" class="truth-post">
+    <div></div>
+    <div></div>
+    <div>
+      <div class="flex flex-col relative z-0">
+        <div>
+          <div>
+            <div class="flex flex-col space-y-2 relative">
+              <div class="truth-meta">Donald J. Trump</div>
+              <div class="truth-meta">@realDonaldTrump</div>
+              <div class="truth-meta">Pinned Truth</div>
+              <div class="truth-meta">2h</div>
+              <p><p class="truth-body">We are getting very close to meeting our objectives as we consider winding down our great Military efforts in the Middle East with respect to the Terrorist Regime of Iran: (1) Completely degrading Iranian Missile Capability, Launchers, and everything else pertaining to them. (2) Destroying Iran’s Defense Industrial Base. (3) Eliminating their Navy and Air Force, including Anti Aircraft Weaponry. (4) Never allowing Iran to get even close to Nuclear Capability, and always being in a position where the U.S.A. can quickly and powerfully react to such a situation, should it take place. (5) Protecting, at the highest level, our Middle Eastern Allies, including Israel, Saudi Arabia, Qatar, the United Arab Emirates, Bahrain, Kuwait, and others. The Hormuz Strait will have to be guarded and policed, as necessary, by other Nations who use it — The United States does not! If asked, we will help these Countries in their Hormuz efforts, but it shouldn’t be necessary once Iran’s threat is eradicated. Importantly, it will be an easy Military Operation for them. Thank you for your attention to this matter! President DONALD J. TRUMP</p></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status-116275668825285445" class="truth-post">
+    <div></div>
+    <div>
+      <div class="flex flex-col relative z-0">
+        <div>
+          <div>
+            <div class="flex flex-col space-y-2 relative">
+              <div class="truth-meta">Donald J. Trump</div>
+              <div class="truth-meta">@realDonaldTrump</div>
+              <div class="truth-meta">1h</div>
+              <p><p class="truth-body">I don’t think we should make any deal with the Crazy, Country Destroying, Radical Left Democrats unless, and until, they Vote with Republicans to pass “THE SAVE AMERICA ACT.” It is far more important than anything else we are doing in the Senate, and that includes giving these same terrible people, the Dems (who are to blame for this mess!), a Five Billion Dollar cut in ICE funding, a deal which, even when disguised as something else, is unacceptable to me and the American people - UNLESS it includes their approval of Voter I.D., (with picture!), Citizenship to Vote, No Mail-In Voting (with exceptions), All Paper Ballots, No Men In Women’s Sports, and No Transgender MUTILIZATION of our precious children. Put it all together, and also, let Leader Thune clearly identify those few “Republicans” that are Voting against AMERICA. They will never be elected again! In other words, lump everything together as one, and VOTE!!! Kill the Filibuster, and stay in D.C. for Easter, if necessary. MAKE AMERICA GREAT AGAIN! President DJT</p></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status-116275668825285446" class="truth-post" data-testid="status" aria-label="Donald J. Trump, SNL, Mar 23, 01:15 AM, realDonaldTrump">
+    <div class="truth-meta">Donald J. Trump</div>
+    <div class="truth-meta">@realDonaldTrump</div>
+    <div class="truth-meta">45m</div>
+    <p><p class="truth-body">SNL</p></p>
+  </div>
+
+  <div id="status-116275668825285447" class="truth-post" data-testid="status" aria-label="Donald J. Trump, Schumer got “discombobulated” in the Senate yesterday, and said, “WE MUST FUND ICE,” prior to correcting himself. Thank you Chuck, I agree! President DJT, Mar 23, 01:51 AM, realDonaldTrump">
+    <div class="truth-meta">Donald J. Trump</div>
+    <div class="truth-meta">@realDonaldTrump</div>
+    <div class="truth-meta">9m</div>
+    <p><p class="truth-body">Schumer got “discombobulated” in the Senate yesterday, and said, “WE MUST FUND ICE,” prior to correcting himself. Thank you Chuck, I agree! President DJT</p></p>
+  </div>
+
+  <div id="status-116275668825285448" class="truth-post" data-testid="status" aria-label="Donald J. Trump, The Democrat running in Texas, James Talarico, turns out to be a FRAUD! It showed after the Election when he beat Low IQ Candidate Jasmine Crockett (No relation to Davy Crockett!). He’s got six Genders, insults to Jesus, only vegan food, was wearing a mask in 2023 and 2024, and is a weak, ineffective guy who we “allowed” to win prior to releasing the avalanche of information we had on him because, as bad as Crockett was as a Candidate, this guy is worse! I believe that any human being running against him, sick, incompetent, close to death or, even a child, would win. He may be the Worst Candidate I have ever seen, other than, of course, Gavin Newscum who admitted that he suffers from mental incapacity, is unable to read a speech, and is dumb but, in saying “the dumb comment,” referred to his audience, and therefore became, in the eyes of African Americans, A TOTAL RACIST — which is probably true! Gavin admits that he’s a Low IQ individual, which typically is not good for winning the Presidency. His interview may have been the worst ever given by a “professional” politician. I believe, it takes him OUT OF THE RACE. Kamala is back! President DONALD J. TRUMP, Mar 22, 02:40 PM, realDonaldTrump">
+    <div class="truth-meta">Donald J. Trump</div>
+    <div class="truth-meta">@realDonaldTrump</div>
+    <div class="truth-meta">11h</div>
+    <p><p class="truth-body">The Democrat running in Texas, James Talarico, turns out to be a FRAUD! It showed after the Election when he beat Low IQ Candidate Jasmine Crockett (No relation to Davy Crockett!). He’s got six Genders, insults to Jesus, only vegan food, was wearing a mask in 2023 and 2024, and is a weak, ineffective guy who we “allowed” to win prior to releasing the avalanche of information we had on him because, as bad as Crockett was as a Candidate, this guy is worse! I believe that any human being running against him, sick, incompetent, close to death or, even a child, would win. He may be the Worst Candidate I have ever seen, other than, of course, Gavin Newscum who admitted that he suffers from mental incapacity, is unable to read a speech, and is dumb but, in saying “the dumb comment,” referred to his audience, and therefore became, in the eyes of African Americans, A TOTAL RACIST — which is probably true! Gavin admits that he’s a Low IQ individual, which typically is not good for winning the Presidency. His interview may have been the worst ever given by a “professional” politician. I believe, it takes him OUT OF THE RACE. Kamala is back! President DONALD J. TRUMP</p></p>
+  </div>
+</div>
+
+<script src="scraper.js"></script>
+<script>
+function setStatus(kind, message) {
+  const el = document.getElementById("status");
+  el.className = "status " + kind;
+  el.textContent = message;
+}
+
+function runTruthTest() {
+  try {
+    const posts = extractTruthPosts();
+    const expected = [
+      "We are getting very close to meeting our objectives",
+      "THE SAVE AMERICA ACT",
+      "SNL",
+      "WE MUST FUND ICE",
+      "James Talarico",
+    ];
+
+    if (!Array.isArray(posts) || posts.length < 5) {
+      throw new Error("Expected at least 5 posts, got " + (posts ? posts.length : 0));
+    }
+
+    expected.forEach((snippet, index) => {
+      if (!posts[index] || !posts[index].text.includes(snippet)) {
+        throw new Error("Post " + (index + 1) + " did not contain expected text: " + snippet);
+      }
+    });
+
+    if (!posts[0].isPinned) {
+      throw new Error("Pinned Truth was not marked pinned.");
+    }
+
+    if (!posts[0].url.includes("/posts/116263563453969628")) {
+      throw new Error("Pinned Truth URL was not derived from the status id.");
+    }
+
+    if (!posts[1].text.includes("No Mail-In Voting")) {
+      throw new Error("SAVE AMERICA ACT post was truncated.");
+    }
+
+    setStatus("pass", "PASS: Truth scraper extracted the full fixture correctly.");
+    document.getElementById("results").textContent = JSON.stringify(posts, null, 2);
+  } catch (error) {
+    setStatus("fail", "FAIL: " + error.message);
+    document.getElementById("results").textContent = String(error.stack || error);
+  }
+}
+
+setTimeout(runTruthTest, 50);
+</script>
+</body>
+</html>

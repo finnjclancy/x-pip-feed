@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>X PiP Feed — Settings</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #000;
+  color: #e7e9ea;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  padding: 40px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+h1 { color: #1d9bf0; margin-bottom: 8px; font-size: 22px; }
+p.sub { color: #71767b; margin-bottom: 32px; font-size: 13px; }
+h2 { font-size: 16px; margin-bottom: 12px; color: #e7e9ea; }
+.section { margin-bottom: 32px; }
+
+/* Refresh interval */
+.row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+label { color: #71767b; font-size: 13px; min-width: 120px; }
+input[type="number"] {
+  background: #16181c;
+  border: 1px solid #2f3336;
+  color: #e7e9ea;
+  padding: 8px 12px;
+  border-radius: 8px;
+  width: 80px;
+  font-size: 14px;
+}
+input[type="number"]:focus { outline: none; border-color: #1d9bf0; }
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #1d9bf0;
+}
+input[type="range"] {
+  accent-color: #1d9bf0;
+  width: 180px;
+}
+select {
+  background: #16181c;
+  border: 1px solid #2f3336;
+  color: #e7e9ea;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.account-list { margin-bottom: 12px; }
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  background: #16181c;
+  border-radius: 8px;
+  border: 1px solid #2f3336;
+}
+.account-row input[type="text"] {
+  background: transparent;
+  border: none;
+  color: #e7e9ea;
+  font-size: 14px;
+  flex: 1;
+  outline: none;
+}
+.account-row select {
+  background: #000;
+  border: 1px solid #2f3336;
+  color: #e7e9ea;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.account-row .remove-btn {
+  background: none;
+  border: none;
+  color: #e0245e;
+  cursor: pointer;
+  font-size: 18px;
+  padding: 0 4px;
+  line-height: 1;
+}
+.account-row .remove-btn:hover { color: #ff4466; }
+
+.add-btn {
+  background: none;
+  border: 1px dashed #2f3336;
+  color: #1d9bf0;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+.add-btn:hover { border-color: #1d9bf0; }
+
+  .save-btn {
+    background: #1d9bf0;
+    color: white;
+  border: none;
+  padding: 10px 32px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.save-btn:hover { background: #1a8cd8; }
+
+.secondary-btn {
+  background: transparent;
+  color: #e7e9ea;
+  border: 1px solid #2f3336;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.secondary-btn:hover {
+  border-color: #1d9bf0;
+  background: #0f1419;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-btn {
+  background: #16181c;
+  color: #e7e9ea;
+  border: 1px solid #2f3336;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.preset-btn:hover,
+.preset-btn.active {
+  border-color: #1d9bf0;
+  background: #0f1419;
+}
+
+.saved {
+  display: inline-block;
+  margin-left: 12px;
+  color: #00ba7c;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.saved.show { opacity: 1; }
+
+.note { color: #71767b; font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>X PiP Feed</h1>
+<p class="sub">Configure the PiP feed for your X Following timeline and Donald Trump’s Truth Social page.</p>
+
+<div class="section">
+  <h2>Refresh Interval</h2>
+  <div class="row">
+    <label>Seconds between refreshes</label>
+    <input type="number" id="interval" min="10" max="30" value="20">
+  </div>
+  <p class="note">10 to 29 seconds uses an in-extension timer. 30 seconds uses Chrome alarms.</p>
+</div>
+
+<div class="section">
+  <h2>Notifications</h2>
+  <div class="row">
+    <label for="play-sound">Play sound on new posts</label>
+    <input type="checkbox" id="play-sound">
+  </div>
+  <div class="row">
+    <label for="sound-type">Notification sound</label>
+    <select id="sound-type">
+      <option value="chime">Chime</option>
+      <option value="bell" selected>Bell</option>
+      <option value="pop">Pop</option>
+    </select>
+  </div>
+  <div class="row">
+    <label for="sound-volume">Volume</label>
+    <input type="range" id="sound-volume" min="0" max="1000" step="1" value="100">
+    <span id="sound-volume-value">100%</span>
+  </div>
+  <div class="row">
+    <label></label>
+    <div class="preset-row" id="sound-presets">
+      <button class="preset-btn" type="button" data-volume="50">50%</button>
+      <button class="preset-btn active" type="button" data-volume="100">100%</button>
+      <button class="preset-btn" type="button" data-volume="250">250%</button>
+      <button class="preset-btn" type="button" data-volume="500">500%</button>
+      <button class="preset-btn" type="button" data-volume="750">750%</button>
+      <button class="preset-btn" type="button" data-volume="1000">1000%</button>
+    </div>
+  </div>
+  <div class="row">
+    <label></label>
+    <button class="secondary-btn" id="test-sound" type="button">Test Sound</button>
+  </div>
+  <p class="note">Plays a short alert in the PiP window when a new X or Truth post arrives.</p>
+</div>
+
+<div class="section">
+  <h2>Translate Accounts</h2>
+  <p class="note" style="margin-bottom: 12px;">Add X accounts whose posts should be translated to English in the PiP feed. Translation uses Google Translate when those accounts appear in your Following timeline.</p>
+  <div class="account-list" id="account-list"></div>
+  <button class="add-btn" id="add-account" type="button">+ Add Account</button>
+</div>
+
+<div style="margin-top: 24px;">
+  <button class="save-btn" id="save">Save Settings</button>
+  <span class="saved" id="saved-msg">Saved!</span>
+</div>
+
+<script src="options.js"></script>
+</body>
+</html>

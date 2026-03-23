@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HIP-3 Implied Open Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Hyperliquid HIP-3</p>
+          <h1>Implied open, funding drag, and discovery bounds for trade[XYZ]</h1>
+          <p class="lede">
+            Live `xyz` perp data from Hyperliquid, streamed over websocket. The dashboard recomputes implied open
+            continuously from current funding and a manual annual discount-rate assumption, without requiring page refresh.
+          </p>
+        </div>
+        <div class="hero-meta">
+          <button id="reconnectButton" class="button">Reconnect stream</button>
+          <p id="streamStatus" class="stream-status is-connecting">Connecting to Hyperliquid…</p>
+          <p id="snapshotStamp" class="stamp">Loading latest snapshot…</p>
+        </div>
+      </header>
+
+      <section id="summaryCards" class="summary-grid" aria-label="Summary metrics"></section>
+
+      <section class="control-bar">
+        <label class="field">
+          <span>Selected asset</span>
+          <select id="assetSelect"></select>
+        </label>
+        <label class="field">
+          <span>Search</span>
+          <input id="searchInput" type="search" placeholder="TSLA, SP500, GOLD…" />
+        </label>
+        <label class="field">
+          <span>Session type</span>
+          <select id="sessionFilter">
+            <option value="all">All markets</option>
+            <option value="internal">Only markets in internal session</option>
+            <option value="open">Only markets already externally open</option>
+            <option value="cme">CME-style</option>
+            <option value="equity24x5">Equity 24/5</option>
+            <option value="fx24x5">FX 24/5</option>
+            <option value="korea">Korea</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Sort</span>
+          <select id="sortSelect">
+            <option value="carry">Largest implied carry gap</option>
+            <option value="funding">Largest hourly funding</option>
+            <option value="utilization">Highest OI utilization</option>
+            <option value="volume">Highest 24h volume</option>
+            <option value="hours">Closest next external open</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Annual discount rate</span>
+          <input id="discountRateInput" type="number" step="0.01" min="-100" max="100" value="0" />
+        </label>
+      </section>
+
+      <main class="layout">
+        <section class="panel table-panel">
+          <div class="panel-head">
+            <h2>Market snapshot</h2>
+            <p>Click a row to inspect funding history and bounds context.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Market</th>
+                  <th>Mark</th>
+                  <th>Funding / hr</th>
+                  <th>Funding APR</th>
+                  <th>Hours to open</th>
+                  <th>Implied open</th>
+                  <th>Carry gap</th>
+                  <th>Bound</th>
+                  <th>OI util.</th>
+                </tr>
+              </thead>
+              <tbody id="marketTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <aside class="sidebar">
+          <section class="panel detail-panel">
+            <div class="panel-head">
+              <h2 id="detailTitle">Select a market</h2>
+              <p id="detailSubtitle">The detail pane will show funding history, carry breakdown, and bound scope.</p>
+            </div>
+            <div id="detailBody" class="detail-body empty-state">
+              Pick a row from the table to inspect one market in depth.
+            </div>
+          </section>
+
+          <section class="panel notes-panel">
+            <div class="panel-head">
+              <h2>Recent mechanics</h2>
+              <p>Research notes distilled into the dashboard model.</p>
+            </div>
+            <div id="researchNotes" class="notes-list"></div>
+          </section>
+
+          <section class="panel sources-panel">
+            <div class="panel-head">
+              <h2>Sources</h2>
+              <p>Primary docs used for the model and the explanation.</p>
+            </div>
+            <ul id="sourceList" class="source-list"></ul>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+  </html>

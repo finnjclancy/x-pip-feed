@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "X PiP Feed",
+  "version": "5.3",
+  "description": "View posts from your X Following timeline and Donald Trump's Truth Social page in an always-on-top Picture-in-Picture window, with optional translation for selected X accounts.",
+  "permissions": ["storage", "alarms", "tabs", "system.display"],
+  "host_permissions": ["https://translate.googleapis.com/*"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://truthsocial.com/*"
+      ],
+      "js": ["scraper.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "toggle-pip-window": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+X",
+        "mac": "Command+Shift+X"
+      },
+      "description": "Open or close X PiP Feed"
+    },
+    "toggle-pip-compact": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Toggle compact size for X PiP Feed"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Open X PiP Feed"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
