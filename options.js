@@ -45,6 +45,15 @@ const DEFAULTS = {
     { username: "Rahbarenghelab_", fromLang: "fa" },
     { username: "Khamenei_fa", fromLang: "fa" },
     { username: "alilarijani_ir", fromLang: "fa" },
+    { username: "BarakRavid", fromLang: "he" },
+    { username: "Attaqa0", fromLang: "ar" },
+    { username: "AmichaiStein1", fromLang: "he" },
+    { username: "IAFsite", fromLang: "he" },
+    { username: "Tasnimnews_Fa", fromLang: "fa" },
+    { username: "Tasnimbrk", fromLang: "fa" },
+    { username: "aa_ahmadian", fromLang: "fa" },
+    { username: "DrSaeedJalili", fromLang: "fa" },
+    { username: "AlArabiya_Brk", fromLang: "ar" },
   ],
 };
 

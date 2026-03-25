@@ -1,7 +1,7 @@
-// ── SCRAPER + PiP LAUNCHER ──
+// ── SCRAPER + FEED LAUNCHERS ──
 // Content script on supported feed pages.
 // 1) Extracts posts, optionally translates configured X accounts, then stores source-specific feed state.
-// 2) Adds a PiP button so the floating feed can be opened from the page.
+// 2) Adds PiP and side panel buttons so the feed can be opened from the page.
 
 const PLATFORM = (() => {
   const host = window.location.hostname;
@@ -15,6 +15,7 @@ const X_FEED_STORAGE_KEY = "tweets";
 const TRUTH_FEED_STORAGE_KEY = "truthTweets";
 const TRUTH_PROFILE_URL = "https://truthsocial.com/@realDonaldTrump";
 const TRUTH_ACCOUNT = "realDonaldTrump";
+const TRUTH_ACCOUNT_LOOKUP_PATH = "/api/v1/accounts/lookup?acct=" + encodeURIComponent(TRUTH_ACCOUNT);
 const TRUTH_AUTHOR_NAME = "Donald J. Trump";
 const TRUTH_HEADER_SCAN_LINES = 18;
 const SCRAPE_FAST_FALLBACK_INTERVAL_MS = 50;
@@ -125,14 +126,28 @@ function normalizeText(value) {
   return (value || "").trim().toLowerCase();
 }
 
+function stripHtmlToText(html) {
+  if (!html) {
+    return "";
+  }
+
+  const container = document.createElement("div");
+  container.innerHTML = String(html);
+  container.querySelectorAll(".quote-inline, .recipients-inline, script, style").forEach((node) => {
+    node.remove();
+  });
+  return (container.textContent || container.innerText || "").trim();
+}
+
 function getItemKey(item) {
   if (item?.isRetweet) {
     return [
       item.source || PLATFORM,
       "repost",
-      item.retweetedBy || item.retweetContext || "RT",
+      item.repostedByAccount || item.retweetedBy || item.retweetContext || "RT",
       item.url || "",
       item.account || "",
+      item.originalAccount || "",
     ].join("|");
   }
   return item.url || [
@@ -141,6 +156,56 @@ function getItemKey(item) {
     item.timestamp || "",
     item.text || "",
   ].join("|");
+}
+
+function extractHandleFromHref(href) {
+  const value = String(href || "").trim();
+  if (!value) {
+    return "";
+  }
+
+  const cleanHref = value.split("?")[0].split("#")[0];
+  const statusMatch = cleanHref.match(/^\/([A-Za-z0-9_]+)\/status\/\d+$/);
+  if (statusMatch) {
+    return statusMatch[1];
+  }
+
+  const profileMatch = cleanHref.match(/^\/([A-Za-z0-9_]+)$/);
+  if (profileMatch) {
+    return profileMatch[1];
+  }
+
+  return "";
+}
+
+function getArticleProfileHandles(article) {
+  const handles = [];
+  const seen = new Set();
+  article.querySelectorAll('a[href^="/"]').forEach((link) => {
+    const handle = extractHandleFromHref(link.getAttribute("href"));
+    if (!handle || seen.has(handle)) {
+      return;
+    }
+    seen.add(handle);
+    handles.push(handle);
+  });
+  return handles;
+}
+
+function getOriginalTweetAccount(article, fallbackHandles = []) {
+  const timeLink = article.querySelector('time')?.closest('a[href^="/"]');
+  const fromTimeLink = extractHandleFromHref(timeLink?.getAttribute("href"));
+  if (fromTimeLink) {
+    return fromTimeLink;
+  }
+
+  const statusLink = article.querySelector('a[href*="/status/"]');
+  const fromStatusLink = extractHandleFromHref(statusLink?.getAttribute("href"));
+  if (fromStatusLink) {
+    return fromStatusLink;
+  }
+
+  return fallbackHandles[0] || "";
 }
 
 function isTruthPostUrl(url) {
@@ -192,6 +257,8 @@ function extractXTweets() {
       let isRetweet = false;
       let retweetedBy = "";
       let retweetContext = "";
+      let repostedByAccount = "";
+      let originalAccount = "";
       const socialCtx = article.querySelector('[data-testid="socialContext"]');
       if (socialCtx) {
         const ctxText = socialCtx.innerText || "";
@@ -199,19 +266,21 @@ function extractXTweets() {
         if (normalizedCtxText.includes("repost") || normalizedCtxText.includes("retweeted")) {
           isRetweet = true;
           retweetContext = ctxText.trim();
-          retweetedBy = ctxText.replace(/\s*reposted$/i, "").trim();
+          retweetedBy = ctxText.replace(/\s*(reposted|retweeted)$/i, "").trim();
+          const socialCtxLink = socialCtx.querySelector('a[href^="/"]');
+          repostedByAccount = extractHandleFromHref(socialCtxLink?.getAttribute("href"));
         }
       }
 
-      let account = "";
-      const links = article.querySelectorAll('a[role="link"][href^="/"]');
-      for (const link of links) {
-        const href = link.getAttribute("href");
-        if (href && /^\/[A-Za-z0-9_]+$/.test(href)) {
-          account = href.slice(1);
-          break;
-        }
+      const profileHandles = getArticleProfileHandles(article);
+      if (isRetweet && !repostedByAccount) {
+        repostedByAccount = profileHandles[0] || "";
       }
+      originalAccount = getOriginalTweetAccount(
+        article,
+        profileHandles.filter((handle) => handle && handle !== repostedByAccount)
+      );
+      const account = originalAccount || repostedByAccount || profileHandles[0] || "";
 
       const textElement = article.querySelector('[data-testid="tweetText"]');
       const text = textElement ? textElement.innerText : "";
@@ -237,6 +306,8 @@ function extractXTweets() {
           isRetweet,
           retweetedBy,
           retweetContext,
+          repostedByAccount,
+          originalAccount,
           timestamp,
           activityTimestamp,
         });
@@ -900,18 +971,120 @@ function extractTruthPosts() {
   return sanitizeTruthItems(mergedPosts);
 }
 
+function parseTruthApiStatus(status) {
+  const accountHandle = normalizeText(
+    status?.account?.acct || status?.account?.username || status?.account?.username_or_handle
+  ).replace(/^@/, "");
+
+  if (accountHandle !== TRUTH_ACCOUNT.toLowerCase()) {
+    return null;
+  }
+
+  if (status?.reblog) {
+    return null;
+  }
+
+  let text = stripHtmlToText(status?.content || "") || stripHtmlToText(status?.spoiler_text || "");
+  if (!text && Array.isArray(status?.media_attachments) && status.media_attachments.length) {
+    text = "[Media post]";
+  }
+  if (!text) {
+    return null;
+  }
+
+  const statusId = String(status?.id || "").trim();
+  return {
+    source: "truth",
+    account: TRUTH_ACCOUNT,
+    text,
+    url: status?.url || buildTruthPostUrl(statusId),
+    timestamp: String(status?.created_at || "").trim(),
+    activityTimestamp: String(status?.created_at || "").trim(),
+    isRetweet: false,
+    retweetedBy: "",
+    isPinned: !!status?.pinned,
+  };
+}
+
+async function fetchTruthPostsViaApi() {
+  if (window.location.hostname !== "truthsocial.com") {
+    return [];
+  }
+
+  const lookupResponse = await fetch(TRUTH_ACCOUNT_LOOKUP_PATH, {
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+    },
+    cache: "no-store",
+  });
+  if (!lookupResponse.ok) {
+    throw new Error("Truth account lookup failed: " + lookupResponse.status);
+  }
+
+  const account = await lookupResponse.json();
+  const accountId = String(account?.id || "").trim();
+  if (!accountId) {
+    throw new Error("Truth account lookup returned no id");
+  }
+
+  const statusesUrl = new URL("/api/v1/accounts/" + accountId + "/statuses", window.location.origin);
+  statusesUrl.searchParams.set("limit", "40");
+
+  const statusesResponse = await fetch(statusesUrl.toString(), {
+    credentials: "include",
+    headers: {
+      accept: "application/json",
+    },
+    cache: "no-store",
+  });
+  if (!statusesResponse.ok) {
+    throw new Error("Truth statuses fetch failed: " + statusesResponse.status);
+  }
+
+  const statuses = await statusesResponse.json();
+  if (!Array.isArray(statuses)) {
+    throw new Error("Truth statuses response was not an array");
+  }
+
+  return sanitizeTruthItems(statuses.map(parseTruthApiStatus).filter(Boolean));
+}
+
 // ══════════════════════════════════════════════════════════════
 // SHARED STORAGE
 // ══════════════════════════════════════════════════════════════
 
 function storeItems(storageKey, items, label) {
+  function getStoredRecentCycle(item) {
+    if (Number.isFinite(item?.recentCycle)) {
+      return item.recentCycle;
+    }
+    if (item?.isNew) {
+      return 0;
+    }
+    if (item?.isLastBatch) {
+      return 1;
+    }
+    if (item?.isRecentLabel) {
+      return 1;
+    }
+    return 2;
+  }
+
+  function applyRecentCycle(item, cycle) {
+    const boundedCycle = Math.min(Math.max(cycle, 0), 2);
+    item.recentCycle = boundedCycle;
+    item.isNew = boundedCycle === 0;
+    item.isRecentLabel = false;
+    item.isLastBatch = boundedCycle === 1;
+  }
+
   if (!safeStorageLocalGet([storageKey], (data) => {
     const existing = storageKey === TRUTH_FEED_STORAGE_KEY
       ? sanitizeTruthItems(data[storageKey] || [])
       : (data[storageKey] || []);
     existing.forEach((item) => {
-      item.isLastBatch = !!item.isNew;
-      item.isNew = false;
+      applyRecentCycle(item, getStoredRecentCycle(item) + 1);
     });
 
     const seen = new Set(existing.map(getItemKey));
@@ -925,8 +1098,7 @@ function storeItems(storageKey, items, label) {
     });
 
     newItems.forEach((item) => {
-      item.isNew = true;
-      item.isLastBatch = false;
+      applyRecentCycle(item, 0);
     });
 
     const mergedItems = [...newItems, ...existing].slice(0, 200);
@@ -956,6 +1128,15 @@ async function collectItemsForCurrentPlatform() {
   }
 
   if (PLATFORM === "truth") {
+    try {
+      const truthPosts = await fetchTruthPostsViaApi();
+      if (truthPosts.length) {
+        return truthPosts;
+      }
+    } catch (error) {
+      console.warn(LOG_PREFIX, "Truth API fallback failed:", error);
+    }
+
     return extractTruthPosts();
   }
 
@@ -1096,36 +1277,52 @@ function togglePiPWindowFromPage() {
   });
 }
 
+function toggleSidePanelFromPage() {
+  safeSendRuntimeMessage({ action: "toggleSidePanel" }, (resp) => {
+    if (resp?.ok === false) {
+      console.warn(LOG_PREFIX, "Failed to toggle side panel");
+    }
+  });
+}
+
 // ══════════════════════════════════════════════════════════════
 // BUTTON
 // ══════════════════════════════════════════════════════════════
 
-function addPiPButton() {
-  if (scraperMode || document.getElementById("xpip-btn") || !document.body) return;
+function addFeedButtons() {
+  if (scraperMode || document.getElementById("xpip-launchers") || !document.body) return;
+
+  const launcher = document.createElement("div");
+  launcher.id = "xpip-launchers";
+  launcher.setAttribute("style", `
+    position: fixed !important;
+    top: 20px !important;
+    right: 20px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    z-index: 2147483647 !important;
+  `);
 
   const btn = document.createElement("button");
   btn.id = "xpip-btn";
   btn.textContent = "PiP";
   btn.setAttribute("style", `
-    position: fixed !important;
-    top: 20px !important;
-    right: 20px !important;
-    width: 48px !important;
-    height: 48px !important;
+    width: 58px !important;
+    height: 36px !important;
     background: #1d9bf0 !important;
     color: white !important;
-    border-radius: 50% !important;
+    border-radius: 999px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     font-weight: 700 !important;
     font-size: 12px !important;
     cursor: pointer !important;
-    z-index: 2147483647 !important;
     box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
     font-family: -apple-system, sans-serif !important;
     border: none !important;
-    padding: 0 !important;
+    padding: 0 12px !important;
   `);
 
   btn.addEventListener("click", (e) => {
@@ -1135,7 +1332,37 @@ function addPiPButton() {
     togglePiPWindowFromPage();
   }, true);
 
-  document.body.appendChild(btn);
+  const panelBtn = document.createElement("button");
+  panelBtn.id = "xpanel-btn";
+  panelBtn.textContent = "Panel";
+  panelBtn.setAttribute("style", `
+    width: 58px !important;
+    height: 36px !important;
+    background: #16181c !important;
+    color: white !important;
+    border-radius: 999px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-weight: 700 !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+    font-family: -apple-system, sans-serif !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
+    padding: 0 12px !important;
+  `);
+
+  panelBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    toggleSidePanelFromPage();
+  }, true);
+
+  launcher.appendChild(btn);
+  launcher.appendChild(panelBtn);
+  document.body.appendChild(launcher);
 }
 
 if (hasValidExtensionContext()) {
@@ -1164,11 +1391,11 @@ async function initializeScraperTab() {
   }
 
   if (document.body) {
-    addPiPButton();
+    addFeedButtons();
     syncPiPButtonState();
   } else {
     document.addEventListener("DOMContentLoaded", () => {
-      addPiPButton();
+      addFeedButtons();
       syncPiPButtonState();
     }, { once: true });
   }

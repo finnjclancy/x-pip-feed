@@ -3,16 +3,18 @@
 // The user's active tab is never repurposed for scraping.
 
 let xScraperTabId = null;
-let truthScraperTabId = null;
 let pipWindowId = null;
 let pipWindowCompact = false;
 let pipWindowRestoreBounds = null;
 let pinnedPiPActive = false;
 let sessionClosing = false;
+let shortRefreshIntervalId = null;
+let refreshCycleCount = 0;
 let translationCache = null;
 const translationRequests = new Map();
+const feedSurfacePorts = new Set();
+const sidePanelOpenWindowIds = new Set();
 const X_SCRAPER_URL = "https://x.com/home?filter=follows";
-const TRUTH_SCRAPER_URL = "https://truthsocial.com/@realDonaldTrump";
 const DEFAULT_PIP_WIDTH = 400;
 const DEFAULT_PIP_HEIGHT = 580;
 const LAUNCHER_PIP_WIDTH = 720;
@@ -21,17 +23,13 @@ const COMPACT_PIP_WIDTH = 25;
 const COMPACT_PIP_HEIGHT = 25;
 const TRANSLATION_CACHE_STORAGE_KEY = "translationCacheV1";
 const TRANSLATION_CACHE_LIMIT = 500;
+const FEED_SURFACE_PORT_PREFIX = "feed-surface:";
 
 const SCRAPERS = {
   x: {
     label: "X",
     storageKey: "xScraperTabId",
     url: X_SCRAPER_URL,
-  },
-  truth: {
-    label: "Truth",
-    storageKey: "truthScraperTabId",
-    url: TRUTH_SCRAPER_URL,
   },
 };
 
@@ -44,19 +42,40 @@ function safeBroadcastRuntimeMessage(message) {
 }
 
 function getScraperTabId(kind) {
-  return kind === "truth" ? truthScraperTabId : xScraperTabId;
+  return xScraperTabId;
 }
 
 function setScraperTabId(kind, tabId) {
-  if (kind === "truth") {
-    truthScraperTabId = tabId;
-    return;
-  }
   xScraperTabId = tabId;
 }
 
 function isTrackedScraperTab(tabId) {
-  return tabId === xScraperTabId || tabId === truthScraperTabId;
+  return tabId === xScraperTabId;
+}
+
+function isFeedSurfacePort(port) {
+  return typeof port?.name === "string" && port.name.startsWith(FEED_SURFACE_PORT_PREFIX);
+}
+
+function hasActiveFeedSurface() {
+  return feedSurfacePorts.size > 0;
+}
+
+function isSidePanelOpen(windowId) {
+  return Number.isFinite(windowId) && sidePanelOpenWindowIds.has(windowId);
+}
+
+async function getTargetWindowId(preferredWindowId) {
+  if (Number.isFinite(preferredWindowId)) {
+    return preferredWindowId;
+  }
+
+  const currentWindow = await chrome.windows.getLastFocused();
+  if (Number.isFinite(currentWindow?.id)) {
+    return currentWindow.id;
+  }
+
+  throw new Error("Unable to resolve a target window");
 }
 
 // ── Default settings ──
@@ -74,6 +93,15 @@ const DEFAULTS = {
     { username: "Rahbarenghelab_", fromLang: "fa" },
     { username: "Khamenei_fa", fromLang: "fa" },
     { username: "alilarijani_ir", fromLang: "fa" },
+    { username: "BarakRavid", fromLang: "he" },
+    { username: "Attaqa0", fromLang: "ar" },
+    { username: "AmichaiStein1", fromLang: "he" },
+    { username: "IAFsite", fromLang: "he" },
+    { username: "Tasnimnews_Fa", fromLang: "fa" },
+    { username: "Tasnimbrk", fromLang: "fa" },
+    { username: "aa_ahmadian", fromLang: "fa" },
+    { username: "DrSaeedJalili", fromLang: "fa" },
+    { username: "AlArabiya_Brk", fromLang: "ar" },
   ],
 };
 
@@ -92,6 +120,11 @@ function scheduleRefreshAlarm(refreshInterval) {
 }
 
 function clearRefreshSchedule() {
+  if (shortRefreshIntervalId) {
+    clearInterval(shortRefreshIntervalId);
+    shortRefreshIntervalId = null;
+  }
+  refreshCycleCount = 0;
   chrome.alarms.clear("refreshScraper");
 }
 
@@ -314,7 +347,6 @@ async function broadcastPiPStatus(active) {
     url: [
       "https://x.com/*",
       "https://twitter.com/*",
-      "https://truthsocial.com/*",
     ],
   });
   for (const tab of tabs) {
@@ -347,10 +379,7 @@ async function ensureScraperTab(kind) {
 }
 
 async function ensureScraperTabs() {
-  await Promise.all([
-    ensureScraperTab("x"),
-    ensureScraperTab("truth"),
-  ]);
+  await ensureScraperTab("x");
 }
 
 async function removeTabIfPresent(tabId) {
@@ -373,6 +402,8 @@ async function refreshScraperTabs() {
     return;
   }
 
+  refreshCycleCount += 1;
+
   await Promise.all(Object.keys(SCRAPERS).map(async (kind) => {
     const config = SCRAPERS[kind];
     try {
@@ -391,9 +422,16 @@ function scheduleRefreshLoop(refreshInterval) {
   const intervalSeconds = sanitizeRefreshInterval(refreshInterval);
   clearRefreshSchedule();
 
-  if (intervalSeconds >= 30) {
-    scheduleRefreshAlarm(intervalSeconds);
+  if (intervalSeconds < 30) {
+    shortRefreshIntervalId = setInterval(() => {
+      refreshScraperTabs().catch((error) => {
+        console.warn("[BG] Timed refresh failed:", error);
+      });
+    }, intervalSeconds * 1000);
+    return;
   }
+
+  scheduleRefreshAlarm(intervalSeconds);
 }
 
 // ── Alarm-based refresh ──
@@ -403,22 +441,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-async function startPiP() {
+async function startFeedSession() {
   const settings = await getSettings();
-  await chrome.storage.local.set({ pipActive: true, tweets: [], truthTweets: [] });
+  const data = await chrome.storage.local.get("pipActive");
+  if (!data.pipActive) {
+    await chrome.storage.local.set({ pipActive: true, tweets: [] });
+  }
+  await chrome.storage.local.remove(["truthTweets", "truthScraperTabId"]);
   await ensureScraperTabs();
-  await broadcastPiPStatus(true);
   scheduleRefreshLoop(settings.refreshInterval);
-  console.log("[BG] PiP started, refreshing every", settings.refreshInterval, "s");
+  console.log("[BG] Feed session active, refreshing every", settings.refreshInterval, "s");
 }
 
-async function stopPiPInternal() {
+async function stopFeedSessionInternal() {
   clearRefreshSchedule();
   await chrome.storage.local.set({ pipActive: false });
 
-  const tabsToRemove = [xScraperTabId, truthScraperTabId].filter(Boolean);
+  const tabsToRemove = [xScraperTabId].filter(Boolean);
   xScraperTabId = null;
-  truthScraperTabId = null;
   await Promise.all(tabsToRemove.map(removeTabIfPresent));
 
   pipWindowCompact = false;
@@ -427,39 +467,45 @@ async function stopPiPInternal() {
   await chrome.storage.local.remove([
     "scraperTabId",
     "xScraperTabId",
-    "truthScraperTabId",
     "tweets",
     "truthTweets",
   ]);
-  await broadcastPiPStatus(false);
-  console.log("[BG] PiP stopped — alarms cleared, scraper tabs closed");
+  console.log("[BG] Feed session stopped — refresh cleared, scraper tabs closed");
 }
 
-async function stopPiP() {
+async function stopFeedSession() {
   if (sessionClosing) {
     return;
   }
 
   sessionClosing = true;
   try {
-    await stopPiPInternal();
+    await stopFeedSessionInternal();
   } finally {
     sessionClosing = false;
   }
 }
 
+async function maybeStopFeedSession() {
+  if (hasActiveFeedSurface()) {
+    return;
+  }
+
+  await stopFeedSession();
+}
+
 // ── Messages ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "startPiP") {
-    startPiP().then(() => sendResponse({ ok: true })).catch((error) => {
-      console.warn("[BG] startPiP failed:", error);
+    startFeedSession().then(() => sendResponse({ ok: true })).catch((error) => {
+      console.warn("[BG] startFeedSession failed:", error);
       sendResponse({ ok: false });
     });
     return true;
   }
   if (msg.action === "stopPiP") {
-    stopPiP().then(() => sendResponse({ ok: true })).catch((error) => {
-      console.warn("[BG] stopPiP failed:", error);
+    stopFeedSession().then(() => sendResponse({ ok: true })).catch((error) => {
+      console.warn("[BG] stopFeedSession failed:", error);
       sendResponse({ ok: false });
     });
     return true;
@@ -479,21 +525,77 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.action === "getPipStatus") {
+    sendResponse({ active: !!pipWindowId });
+    return true;
+  }
+  if (msg.action === "getSurfaceStatus") {
     chrome.storage.local.get("pipActive", (data) => {
-      sendResponse({ active: !!data.pipActive });
+      sendResponse({
+        feedActive: !!data.pipActive,
+        pipWindowActive: !!pipWindowId,
+        sidePanelSupported: !!chrome.sidePanel?.open,
+      });
     });
     return true;
   }
   if (msg.action === "openPiPWindow") {
-    openPiPSession().then(() => sendResponse({ ok: true })).catch((error) => {
+    openPiPWindow().then(() => sendResponse({ ok: true })).catch((error) => {
       console.warn("[BG] openPiPWindow failed:", error);
       sendResponse({ ok: false });
     });
     return true;
   }
   if (msg.action === "closePiPWindow") {
-    closePiPSession().then(() => sendResponse({ ok: true })).catch((error) => {
+    closePiPWindow().then(() => sendResponse({ ok: true })).catch((error) => {
       console.warn("[BG] closePiPWindow failed:", error);
+      sendResponse({ ok: false });
+    });
+    return true;
+  }
+  if (msg.action === "openSidePanel") {
+    const requestedWindowId = Number.isFinite(msg.windowId) ? msg.windowId : sender.tab?.windowId;
+    openSidePanel(requestedWindowId).then(() => {
+      startFeedSession().catch((error) => {
+        console.warn("[BG] startFeedSession after openSidePanel failed:", error);
+      });
+      sendResponse({ ok: true });
+    }).catch((error) => {
+      console.warn("[BG] openSidePanel failed:", error);
+      sendResponse({ ok: false });
+    });
+    return true;
+  }
+  if (msg.action === "toggleSidePanel") {
+    const requestedWindowId = Number.isFinite(msg.windowId) ? msg.windowId : sender.tab?.windowId;
+    if (!Number.isFinite(requestedWindowId)) {
+      sendResponse({ ok: false });
+      return true;
+    }
+
+    if (isSidePanelOpen(requestedWindowId)) {
+      if (!chrome.sidePanel?.close) {
+        sendResponse({ ok: false });
+        return true;
+      }
+
+      chrome.sidePanel.close({ windowId: requestedWindowId }).then(() => {
+        sendResponse({ ok: true });
+      }).catch((error) => {
+        console.warn("[BG] toggleSidePanel close failed:", error);
+        sendResponse({ ok: false });
+      });
+      return true;
+    }
+
+    if (!chrome.sidePanel?.open) {
+      sendResponse({ ok: false });
+      return true;
+    }
+
+    chrome.sidePanel.open({ windowId: requestedWindowId }).then(() => {
+      sendResponse({ ok: true });
+    }).catch((error) => {
+      console.warn("[BG] toggleSidePanel open failed:", error);
       sendResponse({ ok: false });
     });
     return true;
@@ -530,11 +632,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+chrome.runtime.onConnect.addListener((port) => {
+  if (!isFeedSurfacePort(port)) {
+    return;
+  }
+
+  feedSurfacePorts.add(port);
+  startFeedSession().catch((error) => {
+    console.warn("[BG] Failed to start feed session for surface:", error);
+  });
+
+  port.onDisconnect.addListener(() => {
+    feedSurfacePorts.delete(port);
+    maybeStopFeedSession().catch((error) => {
+      console.warn("[BG] Failed to stop feed session after surface disconnect:", error);
+    });
+  });
+});
+
 async function openPiPWindow() {
   if (pipWindowId) {
     try {
       await chrome.windows.get(pipWindowId);
       chrome.windows.update(pipWindowId, { focused: true });
+      await broadcastPiPStatus(true);
       return;
     } catch (e) {
       pipWindowId = null;
@@ -558,36 +679,59 @@ async function openPiPWindow() {
     left: w.left,
     top: w.top,
   };
+  await broadcastPiPStatus(true);
   setTimeout(() => {
     chrome.windows.update(w.id, { focused: true }).catch(() => {});
   }, 300);
 }
 
-async function openPiPSession() {
-  await startPiP();
-  await openPiPWindow();
+async function openSidePanel(windowId) {
+  if (!chrome.sidePanel?.open) {
+    throw new Error("Side panel API unavailable");
+  }
+
+  const targetWindowId = await getTargetWindowId(windowId);
+
+  await chrome.sidePanel.open({ windowId: targetWindowId });
 }
 
-async function closePiPSession() {
-  if (sessionClosing) {
+async function closeSidePanel(windowId) {
+  if (!chrome.sidePanel?.close) {
+    throw new Error("Side panel close API unavailable");
+  }
+
+  const targetWindowId = await getTargetWindowId(windowId);
+  await chrome.sidePanel.close({ windowId: targetWindowId });
+}
+
+async function toggleSidePanelFromShortcut() {
+  const targetWindowId = await getTargetWindowId();
+
+  if (isSidePanelOpen(targetWindowId)) {
+    await closeSidePanel(targetWindowId);
     return;
   }
 
-  sessionClosing = true;
-  try {
-    const currentPiPWindowId = pipWindowId;
-    pipWindowId = null;
+  await openSidePanel(targetWindowId);
+  startFeedSession().catch((error) => {
+    console.warn("[BG] startFeedSession after shortcut side panel open failed:", error);
+  });
+}
 
-    if (currentPiPWindowId) {
-      try {
-        await chrome.windows.remove(currentPiPWindowId);
-      } catch (e) {}
-    }
-
-    await stopPiPInternal();
-  } finally {
-    sessionClosing = false;
+async function closePiPWindow() {
+  const currentPiPWindowId = pipWindowId;
+  if (currentPiPWindowId) {
+    try {
+      await chrome.windows.remove(currentPiPWindowId);
+    } catch (e) {}
   }
+
+  pipWindowId = null;
+  pipWindowCompact = false;
+  pipWindowRestoreBounds = null;
+  pinnedPiPActive = false;
+  await broadcastPiPStatus(false);
+  await maybeStopFeedSession();
 }
 
 async function togglePiPCompactMode() {
@@ -640,32 +784,60 @@ async function togglePiPCompactMode() {
 }
 
 async function togglePiPFromShortcut() {
-  const data = await chrome.storage.local.get("pipActive");
-
-  if (data.pipActive) {
-    await closePiPSession();
+  if (pipWindowId) {
+    await closePiPWindow();
     return;
   }
 
-  await openPiPSession();
+  await openPiPWindow();
 }
 
 chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === pipWindowId && !sessionClosing) {
+  if (windowId === pipWindowId) {
     pipWindowId = null;
     pipWindowCompact = false;
     pipWindowRestoreBounds = null;
     pinnedPiPActive = false;
-    stopPiP();
+    broadcastPiPStatus(false).catch(() => {});
+    maybeStopFeedSession().catch((error) => {
+      console.warn("[BG] Failed to stop feed session after PiP window removal:", error);
+    });
   }
 });
 
-// ── Toolbar icon click ──
-chrome.action.onClicked.addListener(async () => {
-  await togglePiPFromShortcut();
-});
+if (chrome.sidePanel?.setPanelBehavior) {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((error) => {
+    console.warn("[BG] Failed to enable side panel action behavior:", error);
+  });
+} else {
+  chrome.action.onClicked.addListener(async () => {
+    await togglePiPFromShortcut();
+  });
+}
+
+if (chrome.sidePanel?.onOpened) {
+  chrome.sidePanel.onOpened.addListener((info) => {
+    if (info?.path === "sidepanel.html" && Number.isFinite(info.windowId)) {
+      sidePanelOpenWindowIds.add(info.windowId);
+    }
+  });
+}
+
+if (chrome.sidePanel?.onClosed) {
+  chrome.sidePanel.onClosed.addListener((info) => {
+    if (info?.path === "sidepanel.html" && Number.isFinite(info.windowId)) {
+      sidePanelOpenWindowIds.delete(info.windowId);
+      maybeStopFeedSession().catch((error) => {
+        console.warn("[BG] Failed to stop feed session after side panel close:", error);
+      });
+    }
+  });
+}
 
 chrome.commands.onCommand.addListener(async (command) => {
+  if (command === "toggle-side-panel") {
+    await toggleSidePanelFromShortcut();
+  }
   if (command === "toggle-pip-window") {
     await togglePiPFromShortcut();
   }
@@ -689,9 +861,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 // ── Restore state after service worker restart ──
-chrome.storage.local.get(["scraperTabId", "xScraperTabId", "truthScraperTabId", "pipActive"], (data) => {
+chrome.storage.local.get(["scraperTabId", "xScraperTabId", "pipActive"], (data) => {
   xScraperTabId = data.xScraperTabId || data.scraperTabId || null;
-  truthScraperTabId = data.truthScraperTabId || null;
 
   if (!data.pipActive) {
     return;
@@ -699,16 +870,15 @@ chrome.storage.local.get(["scraperTabId", "xScraperTabId", "truthScraperTabId", 
 
   const tabChecks = [];
   if (xScraperTabId) tabChecks.push(chrome.tabs.get(xScraperTabId));
-  if (truthScraperTabId) tabChecks.push(chrome.tabs.get(truthScraperTabId));
 
   if (!tabChecks.length) {
-    stopPiP();
+    stopFeedSession();
     return;
   }
 
   Promise.allSettled(tabChecks).then((results) => {
     if (results.some((result) => result.status === "rejected")) {
-      stopPiP();
+      stopFeedSession();
       return;
     }
 
@@ -731,12 +901,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === xScraperTabId) {
     xScraperTabId = null;
   }
-  if (tabId === truthScraperTabId) {
-    truthScraperTabId = null;
-  }
 
-  console.log("[BG] A scraper tab was closed manually — closing PiP session");
-  closePiPSession().catch((error) => {
-    console.warn("[BG] Failed to close PiP session after scraper tab removal:", error);
+  console.log("[BG] A scraper tab was closed manually — recreating scraper tabs");
+  startFeedSession().catch((error) => {
+    console.warn("[BG] Failed to recover after scraper tab removal:", error);
   });
 });

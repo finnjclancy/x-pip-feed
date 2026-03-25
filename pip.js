@@ -10,9 +10,8 @@ let notificationSound = "bell";
 let notificationVolume = 1;
 let audioContext = null;
 let hasRenderedFeedOnce = false;
-let lastRenderedItemKeys = new Set();
-let refreshIntervalSeconds = 20;
-let shortRefreshIntervalId = null;
+let notifiedItemKeys = new Set();
+let surfacePort = null;
 let lastSoundPlayedAt = 0;
 const DEFAULT_PIP_WIDTH = 400;
 const DEFAULT_PIP_HEIGHT = 580;
@@ -21,9 +20,11 @@ const LAUNCHER_PIP_HEIGHT = 360;
 const COMPACT_PIP_WIDTH = 25;
 const COMPACT_PIP_HEIGHT = 25;
 const supportsDocumentPiP = "documentPictureInPicture" in window;
-const FEED_STORAGE_KEYS = ["tweets", "truthTweets"];
-const TRUTH_PROFILE_URL = "https://truthsocial.com/@realDonaldTrump";
+const FEED_STORAGE_KEYS = ["tweets"];
 const MIN_SOUND_GAP_MS = 2000;
+const NOTIFIED_ITEM_KEY_LIMIT = 1000;
+const surfaceType = document.body?.dataset.surface || "pip-window";
+const isPiPWindowSurface = surfaceType === "pip-window";
 
 function isContextInvalidatedError(error) {
   return !!error && /Extension context invalidated/i.test(String(error.message || error));
@@ -45,11 +46,12 @@ function showExtensionReloadMessage() {
     launcher.innerHTML =
       '<div class="launcher-card">' +
       '<div class="launcher-title">Extension Reloaded</div>' +
-      '<div class="launcher-copy">This window belongs to an older extension context. Close it and reopen the PiP from the current extension.</div>' +
+      '<div class="launcher-copy">This surface belongs to an older extension context. Close it and reopen the feed from the current extension.</div>' +
       '</div>';
   }
   if (feedEl) {
-    feedEl.style.display = "none";
+    feedEl.style.display = "block";
+    feedEl.innerHTML = '<div class="e">Extension reloaded. Close and reopen this feed.</div>';
   }
 }
 
@@ -109,16 +111,28 @@ function safeRuntimeMessage(message) {
   }
 }
 
-function sanitizeRefreshInterval(value) {
-  const parsed = parseInt(value, 10);
-  if (!Number.isFinite(parsed)) {
-    return 20;
+function connectFeedSurface() {
+  if (surfacePort || !hasValidExtensionContext()) {
+    return;
   }
-  return Math.min(Math.max(parsed, 10), 30);
+
+  try {
+    surfacePort = chrome.runtime.connect({ name: "feed-surface:" + surfaceType });
+    surfacePort.onDisconnect.addListener(() => {
+      surfacePort = null;
+      if (!hasValidExtensionContext()) {
+        showExtensionReloadMessage();
+      }
+    });
+  } catch (error) {
+    if (!isContextInvalidatedError(error)) {
+      console.warn("Failed to connect feed surface:", error);
+    }
+  }
 }
 
 function isFeedStorageChange(changes, areaName) {
-  return areaName === "local" && (changes.tweets || changes.truthTweets);
+  return areaName === "local" && !!changes.tweets;
 }
 
 function copyStylesToWindow(targetDoc) {
@@ -243,12 +257,15 @@ function getFeedKey(item) {
   return [
     getSourceKey(item),
     item.isRetweet ? "1" : "0",
+    item.repostedByAccount || "",
     item.retweetedBy || "",
     item.url || "",
     item.account || "",
+    item.originalAccount || "",
     item.activityTimestamp || "",
     item.timestamp || "",
     item.text || "",
+    item.recentCycle ?? "",
     item.isNew ? "1" : "0",
     item.isLastBatch ? "1" : "0",
   ].join("|");
@@ -259,9 +276,10 @@ function getStableItemKey(item) {
     return [
       getSourceKey(item),
       "repost",
-      item.retweetedBy || item.retweetContext || "RT",
+      item.repostedByAccount || item.retweetedBy || item.retweetContext || "RT",
       item.url || "",
       item.account || "",
+      item.originalAccount || "",
     ].join("|");
   }
   return item?.url || [
@@ -278,50 +296,18 @@ function getTimestampValue(item) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function normalizeFeedText(value) {
-  return (value || "").trim().toLowerCase();
+function getRecencyStage(item) {
+  if (item?.isNew || item?.recentCycle === 0) {
+    return "new";
+  }
+  if (item?.isLastBatch || item?.recentCycle === 1) {
+    return "last-batch";
+  }
+  return "";
 }
 
-function isTruthPostUrl(url) {
-  const value = url || "";
-  return /^https:\/\/truthsocial\.com\/@realDonaldTrump\/posts\/\d+$/i.test(value) ||
-    value.startsWith(TRUTH_PROFILE_URL + "#");
-}
-
-function isTruthShellText(text) {
-  const normalized = normalizeFeedText(text);
-  return [
-    "followers",
-    "following",
-    "truth search ai",
-    "get more with truth+",
-    "get the truth+ patriot package",
-    "support small american businesses",
-    "manage accounts",
-    "help center",
-    "proudly made in the united states of america",
-    "premium live channels",
-    "verification badge",
-  ].some((marker) => normalized.includes(marker));
-}
-
-function sanitizeTruthItems(items) {
-  return (items || []).filter((item) => {
-    if ((item?.source || "truth") !== "truth") {
-      return false;
-    }
-    if (item.account !== "realDonaldTrump") {
-      return false;
-    }
-    if (!item.text || isTruthShellText(item.text)) {
-      return false;
-    }
-    return isTruthPostUrl(item.url);
-  });
-}
-
-function mergeFeeds(xItems, truthItems) {
-  return [...(xItems || []), ...sanitizeTruthItems(truthItems)]
+function mergeFeeds(xItems) {
+  return [...(xItems || [])]
     .sort((a, b) => {
       return getTimestampValue(b) - getTimestampValue(a);
     })
@@ -329,34 +315,13 @@ function mergeFeeds(xItems, truthItems) {
 }
 
 function loadSettings() {
-  safeSyncStorageGet(["playSoundOnNewPosts", "notificationSound", "notificationVolume", "refreshInterval"], (data) => {
+  safeSyncStorageGet(["playSoundOnNewPosts", "notificationSound", "notificationVolume"], (data) => {
     playSoundOnNewPosts = data.playSoundOnNewPosts ?? true;
     notificationSound = data.notificationSound || "bell";
     const volumePercent = Number.isFinite(data.notificationVolume) ? data.notificationVolume : 100;
     notificationVolume = Math.min(Math.max(volumePercent / 100, 0), 10);
-    refreshIntervalSeconds = sanitizeRefreshInterval(data.refreshInterval);
     settingsLoaded = true;
-    scheduleShortRefreshLoop();
   });
-}
-
-function clearShortRefreshLoop() {
-  if (shortRefreshIntervalId) {
-    clearInterval(shortRefreshIntervalId);
-    shortRefreshIntervalId = null;
-  }
-}
-
-function scheduleShortRefreshLoop() {
-  clearShortRefreshLoop();
-
-  if (refreshIntervalSeconds >= 30) {
-    return;
-  }
-
-  shortRefreshIntervalId = setInterval(() => {
-    safeRuntimeMessage({ action: "refreshScrapersNow" });
-  }, refreshIntervalSeconds * 1000);
 }
 
 function ensureAudioContext() {
@@ -417,9 +382,26 @@ function playNewPostSound() {
   playTone("triangle", 660, now + 0.08, 0.16, 0.5);
 }
 
-function hasRenderedNewItems(tweets, previousKeys) {
+function rememberItemKeys(targetSet, tweets) {
+  (tweets || []).forEach((item) => {
+    targetSet.add(getStableItemKey(item));
+  });
+
+  while (targetSet.size > NOTIFIED_ITEM_KEY_LIMIT) {
+    const oldestKey = targetSet.values().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    targetSet.delete(oldestKey);
+  }
+}
+
+function hasUnnotifiedItems(tweets, notifiedKeys) {
   return (tweets || []).some((item) => {
-    return !previousKeys.has(getStableItemKey(item));
+    if (!item?.isNew) {
+      return false;
+    }
+    return !notifiedKeys.has(getStableItemKey(item));
   });
 }
 
@@ -427,14 +409,18 @@ function buildHTML(tweets) {
   let html = "";
   tweets.forEach((t, i) => {
     const urlAttr = t.url ? 'data-url="' + esc(t.url) + '"' : '';
-    const stateClass = (t.isNew ? " new" : (t.isLastBatch ? " last-batch" : "")) + " " + getSourceKey(t);
+    const recencyStage = getRecencyStage(t);
+    const stateClass = (recencyStage ? " " + recencyStage : "") + " " + getSourceKey(t);
+    const headerAccount = t.isRetweet
+      ? (t.repostedByAccount || t.retweetedBy || t.account)
+      : t.account;
     const rtBadge = t.isRetweet
-      ? '<span class="rt-icon">\u21BB</span><span class="rt">' + esc(t.retweetedBy || "RT") + '</span>'
+      ? '<span class="rt-icon">\u21BB</span><span class="rt">@' + esc(t.originalAccount || t.account || "unknown") + '</span>'
       : '';
     const tsDisplay = formatTimestamp(t.activityTimestamp || t.timestamp);
     html += '<div class="t' + stateClass + '" ' + urlAttr + '>' +
       '<div class="h">' +
-        '<span class="a">@' + esc(t.account) + '</span>' +
+        '<span class="a">@' + esc(headerAccount) + '</span>' +
         rtBadge +
         (i === 0
           ? '<span class="c" id="ck">' + formatTime() + '</span>'
@@ -455,30 +441,52 @@ function addClickHandlers(container) {
 }
 
 const feed = document.getElementById("f");
+const usesLauncherSurface = isPiPWindowSurface && supportsDocumentPiP;
+
+function initializePanelControls() {
+  const refreshBtn = document.getElementById("refresh-btn");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      safeRuntimeMessage({ action: "refreshScrapersNow" });
+    });
+  }
+
+  const openPipBtn = document.getElementById("open-pip-btn");
+  if (openPipBtn) {
+    openPipBtn.addEventListener("click", () => {
+      safeRuntimeMessage({ action: "openPiPWindow" });
+    });
+  }
+
+  const settingsBtn = document.getElementById("settings-btn");
+  if (settingsBtn && chrome.runtime?.openOptionsPage) {
+    settingsBtn.addEventListener("click", () => {
+      chrome.runtime.openOptionsPage();
+    });
+  }
+}
 
 function refresh() {
-  if (supportsDocumentPiP && !pinned) return;
+  if (usesLauncherSurface && !pinned) return;
   if (!safeStorageGet(FEED_STORAGE_KEYS, (data) => {
-    const tweets = mergeFeeds(data.tweets, data.truthTweets);
+    const tweets = mergeFeeds(data.tweets);
     if (!tweets.length) {
       if (!lastHash) feed.innerHTML = '<div class="e">Waiting for posts...</div>';
-      lastRenderedItemKeys = new Set();
       return;
     }
     const newHash = tweets.map(getFeedKey).join("|");
     if (newHash === lastHash) return;
-    const nextRenderedItemKeys = new Set(tweets.map(getStableItemKey));
-    const shouldPlaySound = !supportsDocumentPiP &&
+    const shouldPlaySound = !usesLauncherSurface &&
       hasRenderedFeedOnce &&
-      hasRenderedNewItems(tweets, lastRenderedItemKeys);
+      hasUnnotifiedItems(tweets, notifiedItemKeys);
     lastHash = newHash;
-    lastRenderedItemKeys = nextRenderedItemKeys;
     feed.innerHTML = buildHTML(tweets);
     addClickHandlers(feed);
-    if (!supportsDocumentPiP && shouldPlaySound) {
+    rememberItemKeys(notifiedItemKeys, tweets);
+    if (!usesLauncherSurface && shouldPlaySound) {
       playNewPostSound();
     }
-    if (!supportsDocumentPiP) hasRenderedFeedOnce = true;
+    if (!usesLauncherSurface) hasRenderedFeedOnce = true;
   })) {
     return;
   }
@@ -509,10 +517,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       : 100;
     notificationVolume = Math.min(Math.max(volumePercent / 100, 0), 10);
     settingsLoaded = true;
-  }
-  if (areaName === "sync" && Object.prototype.hasOwnProperty.call(changes, "refreshInterval")) {
-    refreshIntervalSeconds = sanitizeRefreshInterval(changes.refreshInterval.newValue);
-    scheduleShortRefreshLoop();
   }
 });
 
@@ -561,19 +565,18 @@ async function pinToTop() {
     let ci = null;
     let storageListener = null;
     let pipHasRenderedOnce = false;
-    let pipLastRenderedItemKeys = new Set();
+    let pipNotifiedItemKeys = new Set();
     function pipRefresh() {
       if (!safeStorageGet(FEED_STORAGE_KEYS, (data) => {
-        const tweets = mergeFeeds(data.tweets, data.truthTweets);
+        const tweets = mergeFeeds(data.tweets);
         const h = tweets.map(getFeedKey).join("|");
         if (h === pipHash) return;
-        const nextRenderedItemKeys = new Set(tweets.map(getStableItemKey));
         const shouldPlaySound = pipHasRenderedOnce &&
-          hasRenderedNewItems(tweets, pipLastRenderedItemKeys);
+          hasUnnotifiedItems(tweets, pipNotifiedItemKeys);
         pipHash = h;
-        pipLastRenderedItemKeys = nextRenderedItemKeys;
         pipFeed.innerHTML = buildHTML(tweets) || '<div class="e">Waiting for posts...</div>';
         addClickHandlers(pipFeed);
+        rememberItemKeys(pipNotifiedItemKeys, tweets);
         if (shouldPlaySound) {
           playNewPostSound();
         }
@@ -608,7 +611,6 @@ async function pinToTop() {
       pipCompact = false;
       pipRestoreBounds = null;
       notifyPinnedPiPState(false);
-      safeRuntimeMessage({ action: "stopPiP" });
       window.close();
     });
 
@@ -652,22 +654,29 @@ window.addEventListener("unhandledrejection", (event) => {
 
 if (!hasValidExtensionContext()) {
   showExtensionReloadMessage();
-} else if (supportsDocumentPiP) {
-  setLauncherMode(true);
-  resizeCurrentWindow(LAUNCHER_PIP_WIDTH, LAUNCHER_PIP_HEIGHT);
-  const pinBtn = document.getElementById("pin-btn");
-  if (pinBtn) {
-    pinBtn.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      pinToTop();
-    });
-  }
-  const launcher = document.getElementById("launcher");
-  if (launcher) launcher.addEventListener("click", pinToTop);
 } else {
-  setLauncherMode(false);
-  resizeCurrentWindow(DEFAULT_PIP_WIDTH, DEFAULT_PIP_HEIGHT);
+  connectFeedSurface();
+  initializePanelControls();
+
+  if (usesLauncherSurface) {
+    setLauncherMode(true);
+    resizeCurrentWindow(LAUNCHER_PIP_WIDTH, LAUNCHER_PIP_HEIGHT);
+    const pinBtn = document.getElementById("pin-btn");
+    if (pinBtn) {
+      pinBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        pinToTop();
+      });
+    }
+    const launcher = document.getElementById("launcher");
+    if (launcher) launcher.addEventListener("click", pinToTop);
+  } else {
+    setLauncherMode(false);
+    if (isPiPWindowSurface) {
+      resizeCurrentWindow(DEFAULT_PIP_WIDTH, DEFAULT_PIP_HEIGHT);
+    }
+  }
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
@@ -677,7 +686,5 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 window.addEventListener("beforeunload", () => {
-  clearShortRefreshLoop();
   notifyPinnedPiPState(false);
-  safeRuntimeMessage({ action: "stopPiP" });
 });

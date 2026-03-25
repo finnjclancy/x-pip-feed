@@ -1,16 +1,15 @@
 {
   "manifest_version": 3,
   "name": "X PiP Feed",
-  "version": "5.3",
-  "description": "View posts from your X Following timeline and Donald Trump's Truth Social page in an always-on-top Picture-in-Picture window, with optional translation for selected X accounts.",
-  "permissions": ["storage", "alarms", "tabs", "system.display"],
+  "version": "5.4",
+  "description": "View posts from your X Following timeline in Picture-in-Picture or Chrome's side panel, with optional translation.",
+  "permissions": ["storage", "alarms", "tabs", "system.display", "sidePanel"],
   "host_permissions": ["https://translate.googleapis.com/*"],
   "content_scripts": [
     {
       "matches": [
         "https://x.com/*",
-        "https://twitter.com/*",
-        "https://truthsocial.com/*"
+        "https://twitter.com/*"
       ],
       "js": ["scraper.js"],
       "run_at": "document_idle"
@@ -20,6 +19,12 @@
     "service_worker": "background.js"
   },
   "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      }
+    },
     "toggle-pip-window": {
       "suggested_key": {
         "default": "Ctrl+Shift+X",
@@ -39,8 +44,11 @@
     "page": "options.html",
     "open_in_tab": true
   },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "action": {
-    "default_title": "Open X PiP Feed"
+    "default_title": "Open X PiP Feed Side Panel"
   },
   "icons": {
     "16": "icon16.png",
